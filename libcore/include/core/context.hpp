@@ -61,6 +61,7 @@ class context {
    * stop and reset worker status
    */
   void stop();
+  void wait_stop();
 
   /**
    * select list of sessions to periodically update
@@ -82,6 +83,8 @@ class context {
    * @return
    */
   std::chrono::nanoseconds latest_fetch_latency() const noexcept;
+
+  common::delegate<context*> on_relogin_required;
 
   common::delegate<session_id_t, session_info const&> on_session_registered;
   common::delegate<session_id_t> on_session_unregistered;

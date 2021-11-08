@@ -32,8 +32,8 @@ std::string const* perfkit::dashboard::curl::instance::_fetch(std::string const&
   _latency     = elapsed;
 
   if (_errc != CURLE_OK) {
-    SPDLOG_WARN("cURL error: ({}) {}", strerr(), errdetail());
-    return &_reused;
+    SPDLOG_WARN("cURL error: ({}: {}) {}", _errc, strerr(), errdetail());
+    return nullptr;
   }
 
   return &_reused;

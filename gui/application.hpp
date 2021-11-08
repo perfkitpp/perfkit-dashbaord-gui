@@ -6,6 +6,10 @@
 #include <core/context.hpp>
 #include <nana/gui/widgets/form.hpp>
 
-struct error_auth_failed : std::exception {};
+class application : public nana::form {
+ public:
+  explicit application(perfkit::dashboard::context* context);
 
-perfkit::dashboard::context* svc_context();
+ private:
+  void _reset() {}
+};
