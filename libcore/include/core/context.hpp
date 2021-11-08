@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <common/array_view.hxx>
 #include <common/delegate.hxx>
 #include <nlohmann/json_fwd.hpp>
 
@@ -39,6 +40,8 @@ struct session_info {
   friend void from_json(nlohmann::json const& j, session_info& o);
 };
 
+using session_id_t = int64_t;
+
 class context {
  public:
   using login_type = context_login_t;
@@ -48,13 +51,47 @@ class context {
   ~context();
 
  public:
-  void poll();
+  /**
+   * execute worker
+   * @param active_session
+   */
+  void start();
+
+  /**
+   * stop and reset worker status
+   */
+  void stop();
+
+  /**
+   * select list of sessions to periodically update
+   * @param session
+   */
+  void focus(session_id_t session, std::chrono::milliseconds interval);
+
+  /**
+   * reset fence indices of given session
+   * @param session -1 indicates all sessions
+   */
+  void reset_cache(session_id_t session = -1);
 
   bool valid() const noexcept;
   void login(login_type const& args);
 
-  common::delegate<int64_t, session_info const&> session_registered;
-  common::delegate<int64_t> session_unregistered;
+  /**
+   * gets latest curl fetch latency.
+   * @return
+   */
+  std::chrono::nanoseconds latest_fetch_latency() const noexcept;
+
+  common::delegate<session_id_t, session_info const&> on_session_registered;
+  common::delegate<session_id_t> on_session_unregistered;
+
+  common::delegate<session_id_t> on_new_config_category;
+  common::delegate<session_id_t> on_config_update;
+
+  common::delegate<session_id_t, std::string_view> on_receive_shell;
+  common::delegate<session_id_t, std::string_view, common::array_view<std::string_view>>
+          on_receive_suggests;
 
  private:
   class impl;

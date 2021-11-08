@@ -5,6 +5,7 @@ add_library(
 
         STATIC
         context.cpp
+        curl.cpp
 )
 
 add_library(

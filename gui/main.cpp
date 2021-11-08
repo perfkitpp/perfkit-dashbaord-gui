@@ -3,8 +3,10 @@
 #include "application.hpp"
 
 int main(int argc, char** argv) {
-  svc_context();
+  auto context = svc_context();
+  context->start();
 
   getchar();
+  context->stop();
   return 0;
 }

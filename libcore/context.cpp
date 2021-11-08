@@ -1,84 +1,130 @@
+#include <atomic>
+#include <optional>
+
+#include <common/poll_timer.hxx>
 #include <core/context.hpp>
-#include <curl/curl.h>
-#include <curl/easy.h>
+#include <core/curl.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
-namespace {
-struct INTERNAL_curl_init_t {
-  INTERNAL_curl_init_t() noexcept { curl_global_init(CURL_GLOBAL_ALL); }
-} INTERNAL_curl_init;
-}  // namespace
+using namespace std::literals;
 
 namespace perfkit::dashboard::detail {
-struct _release_curl_handle {
-  using pointer = CURL*;
-  void operator()(pointer p) noexcept { curl_easy_cleanup(p); }
-};
+struct if_session_fetch {
+  std::map<std::string, session_info> sessions;
 
-using curl_ptr = std::unique_ptr<CURL, _release_curl_handle>;
+  friend void from_json(nlohmann::json const& j, if_session_fetch& o) {
+    j.at("sessions").get_to(o.sessions);
+  }
+};
 }  // namespace perfkit::dashboard::detail
 
 void perfkit::dashboard::from_json(const nlohmann::json& j, perfkit::dashboard::session_info& o) {
-  o.name         = j.value("name", "");
-  o.ip           = j.value("ip", "");
-  o.pid          = j.value("pid", 0);
-  o.machine_name = j.value("machine_name", "");
-  o.epoch        = j.value("epoch", 0);
-  o.description  = j.value("description", "");
+  j.at("name").get_to(o.name);
+  j.at("ip").get_to(o.ip);
+  j.at("pid").get_to(o.pid);
+  j.at("machine_name").get_to(o.machine_name);
+  j.at("epoch").get_to(o.epoch);
+  j.at("description").get_to(o.description);
 }
 
 class perfkit::dashboard::context::impl {
- private:
-  template <typename... Args_>
-  char const* _url(Args_&&... args) {
-    _reused_str = _login.url;
-    (_reused_str.append(std::forward<Args_>(args)), ...);
-    return _reused_str.c_str();
-  }
+  template <typename Dst_, typename... Args_>
+  std::optional<Dst_> _fetch_as(Args_&&... args) {
+    auto pstr        = _curl.fetch(std::forward<Args_>(args)...);
+    _delay_ns_latest = _curl.latency().count();
 
-  template <typename... Args_>
-  std::string const& _fetch(Args_&&... args) {
-    curl_easy_setopt(_curl.get(), CURLOPT_URL, this->_url(std::forward<Args_>(args)...));
+    if (not pstr)
+      return {};
 
-    _reused_str.clear();
-    curl_easy_perform(_curl.get());
-    return _reused_str;
-  }
+    auto json = nlohmann::json::parse(*pstr, nullptr, false);
+    if (json.is_discarded())
+      return {};
 
- public:
-  bool valid() const noexcept { return not _auth_token.empty(); }
-  void login(login_type const& args) {
-    _login = args;
-    _curl.reset();
-    _validate_curl();
-
-    // TODO: implement valid login
-    _auth_token = "hell!";
-
-  }
-
- private:
-  void _validate_curl() {
-    if (not _curl.get()) {
-      _curl.reset(curl_easy_init());
-      curl_easy_setopt(_curl.get(), CURLOPT_WRITEFUNCTION, &_curl_on_read);
-      curl_easy_setopt(_curl.get(), CURLOPT_WRITEDATA, this);
+    try {
+      return json.template get<Dst_>();
+    } catch (std::exception& e) {
+      SPDLOG_ERROR("json parse error: {} ... content was: {}", e.what(), json.dump(2));
+      return {};
     }
   }
 
-  static size_t _curl_on_read(void* buf, size_t size, size_t nmemb, void* user) {
-    SPDLOG_TRACE("curl read: {} bytes, {} nmemb", size, nmemb);
-    ((impl*)user)->_reused_str.append((char const*)buf, size * nmemb);
-    return size;
+ public:
+  void start() {
+    stop();
+
+    _worker_active.store(true);
+    _worker = std::thread(&impl::_worker_loop, this);
+  }
+  void stop() {
+    _worker_active.store(false);
+    if (_worker.joinable())
+      _worker.join();
+  }
+
+  bool valid() const noexcept {
+    std::lock_guard _{_worker_lock};
+    return _valid();
+  }
+
+  void login(login_type const& args) {
+    std::lock_guard _{_worker_lock};
+
+    _login = args;
+    _curl.baseurl(_login.url);
+
+    _auth_token = "ok";
   }
 
  private:
-  detail::curl_ptr _curl;
-  std::string _auth_token;
+  void _worker_loop() {
+    while (_worker_active) {
+      if (not _intervals.minimal()) {
+        std::this_thread::sleep_for(10ms);
+        continue;
+      }
 
+      std::lock_guard _{_worker_lock};
+      if (not _valid())
+        continue;
+
+      // poll sessions
+      if (_intervals.sessions()) {
+        auto sessions = _fetch_as<detail::if_session_fetch>("/sessions");
+
+      }
+
+      // poll shell/configs/traces/images of focusing session
+    }
+  }
+
+  bool _valid() const noexcept {
+    return not _auth_token.empty();
+  }
+
+  void _invalidate() noexcept {
+    _auth_token.clear();
+  }
+
+ private:
+  curl::instance _curl;
+  std::string _auth_token;
   std::string _reused_str;
 
+  std::atomic_bool _worker_active;
+  std::thread _worker;
+  mutable std::mutex _worker_lock;
+
+  std::atomic_int64_t _delay_ns_latest;
+
+  struct intervals_t {
+    common::poll_timer minimal{10ms};
+    common::poll_timer sessions{3000ms};
+    common::poll_timer shell{100ms};
+    common::poll_timer configs{500ms};
+    common::poll_timer trace{200ms};
+    common::poll_timer image{80ms};
+  } _intervals;
   login_type _login;
 };
 
@@ -91,4 +137,10 @@ bool perfkit::dashboard::context::valid() const noexcept {
 void perfkit::dashboard::context::login(
         const perfkit::dashboard::context::login_type& args) {
   self->login(args);
+}
+void perfkit::dashboard::context::start() {
+  self->start();
+}
+void perfkit::dashboard::context::stop() {
+  self->stop();
 }
