@@ -4,6 +4,7 @@ add_executable(
         ${PROJECT_NAME}
 
         main.cpp
+        application.cpp
 )
 
 target_link_libraries(
