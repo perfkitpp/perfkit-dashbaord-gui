@@ -1,0 +1,5 @@
+.vs
+.idea
+_Resharper*
+out/
+cmake-build-*
