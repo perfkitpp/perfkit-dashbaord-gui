@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(perfkit-dashboard-gui)
 
+add_compile_options("/FIiso646.h")
+
 add_subdirectory(third/nana EXCLUDE_FROM_ALL)
 add_subdirectory(third/spdlog-1.9.2 EXCLUDE_FROM_ALL)
 add_subdirectory(third/nlohmann-json EXCLUDE_FROM_ALL)

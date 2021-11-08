@@ -1,3 +1,6 @@
 [submodule "third/nana"]
 	path = third/nana
 	url = git@github.com:cnjinhao/nana.git
+[submodule "libcore/include/common"]
+	path = libcore/include/common
+	url = git@github.com:perfkitpp/cppheaders.git
